@@ -1,0 +1,302 @@
+-- LegitModule - Модуль для легитного аимбота
+local LegitModule = {}
+
+-- Сервисы
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Workspace = game:GetService("Workspace")
+
+-- Локальный игрок
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+-- Настройки аимбота
+LegitModule.Settings = {
+    Aimbot = {
+        Enabled = false,
+        FOV = 90,
+        Smoothness = 50,
+        TargetMode = "Closest to Crosshair",
+        Hitboxes = {Head = true}
+    },
+    Triggerbot = {
+        Enabled = false,
+        Delay = 50,
+        Hitboxes = {Head = true, Torso = true}
+    },
+    Visuals = {
+        FOVCircle = false,
+        Crosshair = false,
+        FOVColor = Color3.fromRGB(255, 255, 255)
+    }
+}
+
+-- FOV Circle Drawing
+local FOVCircle = Drawing.new("Circle")
+FOVCircle.Thickness = 2
+FOVCircle.NumSides = 64
+FOVCircle.Filled = false
+FOVCircle.Transparency = 1
+FOVCircle.Visible = false
+FOVCircle.Color = Color3.fromRGB(255, 255, 255)
+
+-- Crosshair Drawing
+local CrosshairH = Drawing.new("Line")
+local CrosshairV = Drawing.new("Line")
+CrosshairH.Thickness = 2
+CrosshairV.Thickness = 2
+CrosshairH.Color = Color3.fromRGB(255, 255, 255)
+CrosshairV.Color = Color3.fromRGB(255, 255, 255)
+CrosshairH.Visible = false
+CrosshairV.Visible = false
+
+-- Получить позицию хитбокса
+local function GetHitboxPosition(character, hitboxName)
+    if not character then return nil end
+    
+    local hitboxMap = {
+        Head = "Head",
+        Torso = "Torso",
+        Arms = "RightUpperArm",
+        Legs = "RightUpperLeg"
+    }
+    
+    local partName = hitboxMap[hitboxName]
+    if not partName then return nil end
+    
+    local part = character:FindFirstChild(partName)
+    if part and part:IsA("BasePart") then
+        return part.Position
+    end
+    
+    return nil
+end
+
+-- Проверка видимости цели
+local function IsVisible(targetPosition)
+    if not LocalPlayer.Character then return false end
+    
+    local origin = Camera.CFrame.Position
+    local direction = (targetPosition - origin).Unit * (targetPosition - origin).Magnitude
+    
+    local raycastParams = RaycastParams.new()
+    raycastParams.FilterDescendantsInstances = {LocalPlayer.Character, Camera}
+    raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+    raycastParams.IgnoreWater = true
+    
+    local raycastResult = Workspace:Raycast(origin, direction, raycastParams)
+    
+    if raycastResult then
+        local hitPart = raycastResult.Instance
+        if hitPart and hitPart.Parent and Players:GetPlayerFromCharacter(hitPart.Parent) then
+            return true
+        end
+        return false
+    end
+    
+    return true
+end
+
+-- Получить расстояние от центра экрана до позиции
+local function GetDistanceFromCenter(position)
+    local screenPos, onScreen = Camera:WorldToViewportPoint(position)
+    if not onScreen then return math.huge end
+    
+    local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    local targetPos = Vector2.new(screenPos.X, screenPos.Y)
+    
+    return (screenCenter - targetPos).Magnitude
+end
+
+-- Получить расстояние от игрока до цели
+local function GetDistanceFromPlayer(targetPosition)
+    if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
+        return math.huge
+    end
+    
+    return (LocalPlayer.Character.HumanoidRootPart.Position - targetPosition).Magnitude
+end
+
+-- Найти лучшую цель
+function LegitModule:GetBestTarget()
+    local bestTarget = nil
+    local bestValue = math.huge
+    
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and player.Character then
+            local character = player.Character
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            
+            if humanoid and humanoid.Health > 0 then
+                -- Проверяем каждый выбранный хитбокс
+                for hitboxName, enabled in pairs(self.Settings.Aimbot.Hitboxes) do
+                    if enabled then
+                        local hitboxPos = GetHitboxPosition(character, hitboxName)
+                        
+                        if hitboxPos then
+                            local distanceFromCenter = GetDistanceFromCenter(hitboxPos)
+                            
+                            -- Проверка FOV
+                            local screenPos, onScreen = Camera:WorldToViewportPoint(hitboxPos)
+                            if onScreen and distanceFromCenter <= self.Settings.Aimbot.FOV then
+                                -- Проверка видимости
+                                if IsVisible(hitboxPos) then
+                                    local value = 0
+                                    
+                                    -- Выбор режима таргетинга
+                                    if self.Settings.Aimbot.TargetMode == "Closest to Crosshair" then
+                                        value = distanceFromCenter
+                                    elseif self.Settings.Aimbot.TargetMode == "Closest to Player" then
+                                        value = GetDistanceFromPlayer(hitboxPos)
+                                    elseif self.Settings.Aimbot.TargetMode == "Lowest Health" then
+                                        value = humanoid.Health
+                                    end
+                                    
+                                    if value < bestValue then
+                                        bestValue = value
+                                        bestTarget = {
+                                            Player = player,
+                                            Position = hitboxPos,
+                                            Hitbox = hitboxName
+                                        }
+                                    end
+                                end
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    return bestTarget
+end
+
+-- Плавное наведение камеры
+function LegitModule:SmoothAim(targetPosition)
+    if not targetPosition then return end
+    
+    local cameraCFrame = Camera.CFrame
+    local targetCFrame = CFrame.new(cameraCFrame.Position, targetPosition)
+    
+    -- Вычисляем разницу углов
+    local currentLook = cameraCFrame.LookVector
+    local targetLook = targetCFrame.LookVector
+    
+    -- Применяем плавность
+    local smoothness = self.Settings.Aimbot.Smoothness / 100
+    local lerpedLook = currentLook:Lerp(targetLook, 1 - smoothness)
+    
+    -- Устанавливаем новую камеру
+    Camera.CFrame = CFrame.new(cameraCFrame.Position, cameraCFrame.Position + lerpedLook)
+end
+
+-- Проверка триггербота
+function LegitModule:CheckTriggerbot()
+    if not self.Settings.Triggerbot.Enabled then return false end
+    if not LocalPlayer.Character then return false end
+    
+    local mouse = LocalPlayer:GetMouse()
+    local target = mouse.Target
+    
+    if target and target.Parent then
+        local targetPlayer = Players:GetPlayerFromCharacter(target.Parent)
+        
+        if targetPlayer and targetPlayer ~= LocalPlayer then
+            local character = targetPlayer.Character
+            local humanoid = character:FindFirstChildOfClass("Humanoid")
+            
+            if humanoid and humanoid.Health > 0 then
+                -- Проверяем хитбоксы
+                for hitboxName, enabled in pairs(self.Settings.Triggerbot.Hitboxes) do
+                    if enabled then
+                        local hitboxMap = {
+                            Head = "Head",
+                            Torso = "Torso",
+                            Arms = {"LeftUpperArm", "RightUpperArm", "LeftLowerArm", "RightLowerArm"},
+                            Legs = {"LeftUpperLeg", "RightUpperLeg", "LeftLowerLeg", "RightLowerLeg"}
+                        }
+                        
+                        local parts = hitboxMap[hitboxName]
+                        if type(parts) == "string" then
+                            parts = {parts}
+                        end
+                        
+                        for _, partName in pairs(parts) do
+                            if target.Name == partName or target.Parent:FindFirstChild(partName) == target then
+                                return true
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    return false
+end
+
+-- Обновление визуалов
+function LegitModule:UpdateVisuals()
+    local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y / 2)
+    
+    -- FOV Circle
+    if self.Settings.Visuals.FOVCircle then
+        FOVCircle.Visible = true
+        FOVCircle.Position = screenCenter
+        FOVCircle.Radius = self.Settings.Aimbot.FOV
+        FOVCircle.Color = self.Settings.Visuals.FOVColor
+    else
+        FOVCircle.Visible = false
+    end
+    
+    -- Crosshair
+    if self.Settings.Visuals.Crosshair then
+        local size = 10
+        CrosshairH.Visible = true
+        CrosshairV.Visible = true
+        CrosshairH.From = Vector2.new(screenCenter.X - size, screenCenter.Y)
+        CrosshairH.To = Vector2.new(screenCenter.X + size, screenCenter.Y)
+        CrosshairV.From = Vector2.new(screenCenter.X, screenCenter.Y - size)
+        CrosshairV.To = Vector2.new(screenCenter.X, screenCenter.Y + size)
+    else
+        CrosshairH.Visible = false
+        CrosshairV.Visible = false
+    end
+end
+
+-- Основной цикл
+local triggerCooldown = false
+function LegitModule:Start()
+    RunService.RenderStepped:Connect(function()
+        -- Обновление визуалов
+        self:UpdateVisuals()
+        
+        -- Аимбот
+        if self.Settings.Aimbot.Enabled then
+            local target = self:GetBestTarget()
+            if target then
+                self:SmoothAim(target.Position)
+            end
+        end
+        
+        -- Триггербот
+        if self.Settings.Triggerbot.Enabled and not triggerCooldown then
+            if self:CheckTriggerbot() then
+                triggerCooldown = true
+                
+                task.wait(self.Settings.Triggerbot.Delay / 1000)
+                
+                -- Симуляция клика
+                mouse1press()
+                task.wait(0.05)
+                mouse1release()
+                
+                triggerCooldown = false
+            end
+        end
+    end)
+end
+
+return LegitModule
