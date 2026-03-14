@@ -18,7 +18,11 @@ LegitModule.Settings = {
         FOV = 90,
         Smoothness = 50,
         TargetMode = "Closest to Crosshair",
-        Hitboxes = {Head = true}
+        Hitboxes = {Head = true},
+        WallCheck = true,
+        EnemyCheck = false,
+        InAirCheck = false,
+        ScopeCheck = false
     },
     Triggerbot = {
         Enabled = false,
@@ -98,6 +102,86 @@ local function IsVisible(targetPosition)
     return true
 end
 
+-- Проверка, является ли игрок врагом
+local function IsEnemy(player)
+    if not LegitModule.Settings.Aimbot.EnemyCheck then
+        return true -- Если проверка выключена, считаем всех врагами
+    end
+    
+    -- Проверка по Team
+    if player.Team and LocalPlayer.Team then
+        return player.Team ~= LocalPlayer.Team
+    end
+    
+    -- Если нет команд, считаем всех врагами
+    return true
+end
+
+-- Проверка, находится ли игрок в воздухе
+local function IsInAir()
+    if not LegitModule.Settings.Aimbot.InAirCheck then
+        return false -- Если проверка выключена, считаем что не в воздухе
+    end
+    
+    if not LocalPlayer.Character then return false end
+    
+    local humanoid = LocalPlayer.Character:FindFirstChildOfClass("Humanoid")
+    if humanoid then
+        -- Проверяем состояние гуманоида
+        local state = humanoid:GetState()
+        if state == Enum.HumanoidStateType.Freefall or 
+           state == Enum.HumanoidStateType.Flying or
+           state == Enum.HumanoidStateType.Jumping then
+            return true
+        end
+        
+        -- Дополнительная проверка через raycast вниз
+        local rootPart = LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+        if rootPart then
+            local rayOrigin = rootPart.Position
+            local rayDirection = Vector3.new(0, -4, 0)
+            
+            local raycastParams = RaycastParams.new()
+            raycastParams.FilterDescendantsInstances = {LocalPlayer.Character}
+            raycastParams.FilterType = Enum.RaycastFilterType.Blacklist
+            
+            local rayResult = Workspace:Raycast(rayOrigin, rayDirection, raycastParams)
+            
+            if not rayResult then
+                return true -- Нет земли под ногами
+            end
+        end
+    end
+    
+    return false
+end
+
+-- Проверка, находится ли игрок в зуме/scope
+local function IsScoped()
+    if not LegitModule.Settings.Aimbot.ScopeCheck then
+        return false -- Если проверка выключена, считаем что не в зуме
+    end
+    
+    if not LocalPlayer.Character then return false end
+    
+    -- Проверка через FOV камеры (обычно при зуме FOV уменьшается)
+    local currentFOV = Camera.FieldOfView
+    if currentFOV < 70 then
+        return true
+    end
+    
+    -- Проверка наличия инструмента с зумом
+    local tool = LocalPlayer.Character:FindFirstChildOfClass("Tool")
+    if tool then
+        -- Проверяем, есть ли у инструмента свойства зума
+        if tool:FindFirstChild("AimPart") or tool:FindFirstChild("Scope") then
+            return true
+        end
+    end
+    
+    return false
+end
+
 -- Получить расстояние от центра экрана до позиции
 local function GetDistanceFromCenter(position)
     local screenPos, onScreen = Camera:WorldToViewportPoint(position)
@@ -120,11 +204,26 @@ end
 
 -- Найти лучшую цель
 function LegitModule:GetBestTarget()
+    -- Проверка In Air Check
+    if IsInAir() then
+        return nil
+    end
+    
+    -- Проверка Scope Check
+    if IsScoped() then
+        return nil
+    end
+    
     local bestTarget = nil
     local bestValue = math.huge
     
     for _, player in pairs(Players:GetPlayers()) do
         if player ~= LocalPlayer and player.Character then
+            -- Проверка Enemy Check
+            if not IsEnemy(player) then
+                continue
+            end
+            
             local character = player.Character
             local humanoid = character:FindFirstChildOfClass("Humanoid")
             local rootPart = character:FindFirstChild("HumanoidRootPart")
@@ -144,28 +243,32 @@ function LegitModule:GetBestTarget()
                                 
                                 -- Проверка FOV
                                 if distanceFromCenter <= self.Settings.Aimbot.FOV then
-                                    -- Проверка видимости
-                                    if IsVisible(hitboxPos) then
-                                        local value = 0
-                                        
-                                        -- Выбор режима таргетинга
-                                        if self.Settings.Aimbot.TargetMode == "Closest to Crosshair" then
-                                            value = distanceFromCenter
-                                        elseif self.Settings.Aimbot.TargetMode == "Closest to Player" then
-                                            value = GetDistanceFromPlayer(hitboxPos)
-                                        elseif self.Settings.Aimbot.TargetMode == "Lowest Health" then
-                                            value = humanoid.Health
+                                    -- Проверка Wall Check
+                                    if self.Settings.Aimbot.WallCheck then
+                                        if not IsVisible(hitboxPos) then
+                                            continue
                                         end
-                                        
-                                        if value < bestValue then
-                                            bestValue = value
-                                            bestTarget = {
-                                                Player = player,
-                                                Position = hitboxPos,
-                                                Hitbox = hitboxName,
-                                                Character = character
-                                            }
-                                        end
+                                    end
+                                    
+                                    local value = 0
+                                    
+                                    -- Выбор режима таргетинга
+                                    if self.Settings.Aimbot.TargetMode == "Closest to Crosshair" then
+                                        value = distanceFromCenter
+                                    elseif self.Settings.Aimbot.TargetMode == "Closest to Player" then
+                                        value = GetDistanceFromPlayer(hitboxPos)
+                                    elseif self.Settings.Aimbot.TargetMode == "Lowest Health" then
+                                        value = humanoid.Health
+                                    end
+                                    
+                                    if value < bestValue then
+                                        bestValue = value
+                                        bestTarget = {
+                                            Player = player,
+                                            Position = hitboxPos,
+                                            Hitbox = hitboxName,
+                                            Character = character
+                                        }
                                     end
                                 end
                             end
