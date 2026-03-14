@@ -389,6 +389,33 @@ local aimbotToggleState = false
 local lastKeybindState = false
 local silentAimTarget = nil -- Текущая цель для Silent Aim
 
+-- Silent Aim Hook
+local oldNamecall
+oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+    local args = {...}
+    local method = getnamecallmethod()
+    
+    -- Перехватываем FireServer для подмены направления выстрела
+    if method == "FireServer" and LegitModule.Settings.Aimbot.SilentAim and silentAimTarget then
+        -- Проверяем, что это выстрел (обычно содержит позицию или направление)
+        if typeof(args[1]) == "Vector3" or typeof(args[2]) == "Vector3" then
+            -- Подменяем направление на цель
+            local targetPos = silentAimTarget.Position
+            
+            -- Находим аргумент с направлением и заменяем его
+            for i = 1, #args do
+                if typeof(args[i]) == "Vector3" then
+                    -- Заменяем на направление к цели
+                    args[i] = targetPos
+                    break
+                end
+            end
+        end
+    end
+    
+    return oldNamecall(self, unpack(args))
+end)
+
 -- Функция для установки кейбинда
 function LegitModule:SetAimbotKeybind(key)
     aimbotKeybind = key
@@ -490,11 +517,11 @@ function LegitModule:Start()
                 -- Если Silent Aim включен, только сохраняем цель без движения камеры
                 if self.Settings.Aimbot.SilentAim then
                     silentAimTarget = target
-                    -- Не двигаем камеру в Silent Aim режиме
+                    -- Не двигаем камеру в Silent Aim режиме - пули полетят в цель автоматически
                 else
                     -- Обычный аимбот - наводим камеру
                     self:SmoothAim(target.Position)
-                    silentAimTarget = nil
+                    silentAimTarget = target -- Сохраняем для возможного использования
                 end
                 
                 currentTarget = target
@@ -515,7 +542,7 @@ function LegitModule:Start()
                                     silentAimTarget = currentTarget
                                 else
                                     self:SmoothAim(currentTarget.Position)
-                                    silentAimTarget = nil
+                                    silentAimTarget = currentTarget
                                 end
                             else
                                 currentTarget = nil
