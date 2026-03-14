@@ -127,39 +127,45 @@ function LegitModule:GetBestTarget()
         if player ~= LocalPlayer and player.Character then
             local character = player.Character
             local humanoid = character:FindFirstChildOfClass("Humanoid")
+            local rootPart = character:FindFirstChild("HumanoidRootPart")
             
-            if humanoid and humanoid.Health > 0 then
+            if humanoid and humanoid.Health > 0 and rootPart then
                 -- Проверяем каждый выбранный хитбокс
                 for hitboxName, enabled in pairs(self.Settings.Aimbot.Hitboxes) do
                     if enabled then
                         local hitboxPos = GetHitboxPosition(character, hitboxName)
                         
                         if hitboxPos then
-                            local distanceFromCenter = GetDistanceFromCenter(hitboxPos)
-                            
-                            -- Проверка FOV
+                            -- Проверяем, что цель на экране
                             local screenPos, onScreen = Camera:WorldToViewportPoint(hitboxPos)
-                            if onScreen and distanceFromCenter <= self.Settings.Aimbot.FOV then
-                                -- Проверка видимости
-                                if IsVisible(hitboxPos) then
-                                    local value = 0
-                                    
-                                    -- Выбор режима таргетинга
-                                    if self.Settings.Aimbot.TargetMode == "Closest to Crosshair" then
-                                        value = distanceFromCenter
-                                    elseif self.Settings.Aimbot.TargetMode == "Closest to Player" then
-                                        value = GetDistanceFromPlayer(hitboxPos)
-                                    elseif self.Settings.Aimbot.TargetMode == "Lowest Health" then
-                                        value = humanoid.Health
-                                    end
-                                    
-                                    if value < bestValue then
-                                        bestValue = value
-                                        bestTarget = {
-                                            Player = player,
-                                            Position = hitboxPos,
-                                            Hitbox = hitboxName
-                                        }
+                            
+                            if onScreen then
+                                local distanceFromCenter = GetDistanceFromCenter(hitboxPos)
+                                
+                                -- Проверка FOV
+                                if distanceFromCenter <= self.Settings.Aimbot.FOV then
+                                    -- Проверка видимости
+                                    if IsVisible(hitboxPos) then
+                                        local value = 0
+                                        
+                                        -- Выбор режима таргетинга
+                                        if self.Settings.Aimbot.TargetMode == "Closest to Crosshair" then
+                                            value = distanceFromCenter
+                                        elseif self.Settings.Aimbot.TargetMode == "Closest to Player" then
+                                            value = GetDistanceFromPlayer(hitboxPos)
+                                        elseif self.Settings.Aimbot.TargetMode == "Lowest Health" then
+                                            value = humanoid.Health
+                                        end
+                                        
+                                        if value < bestValue then
+                                            bestValue = value
+                                            bestTarget = {
+                                                Player = player,
+                                                Position = hitboxPos,
+                                                Hitbox = hitboxName,
+                                                Character = character
+                                            }
+                                        end
                                     end
                                 end
                             end
@@ -184,9 +190,14 @@ function LegitModule:SmoothAim(targetPosition)
     local currentLook = cameraCFrame.LookVector
     local targetLook = targetCFrame.LookVector
     
-    -- Применяем плавность
-    local smoothness = self.Settings.Aimbot.Smoothness / 100
-    local lerpedLook = currentLook:Lerp(targetLook, 1 - smoothness)
+    -- Применяем плавность (инвертируем для правильной работы)
+    local smoothness = math.clamp(self.Settings.Aimbot.Smoothness, 1, 100) / 100
+    local lerpAmount = 1 - smoothness
+    
+    -- Увеличиваем скорость наведения
+    lerpAmount = lerpAmount * 0.5
+    
+    local lerpedLook = currentLook:Lerp(targetLook, lerpAmount)
     
     -- Устанавливаем новую камеру
     Camera.CFrame = CFrame.new(cameraCFrame.Position, cameraCFrame.Position + lerpedLook)
@@ -301,7 +312,12 @@ local function IsKeybindPressed()
 end
 
 function LegitModule:Start()
-    RunService.RenderStepped:Connect(function()
+    -- Переменная для отслеживания текущей цели
+    local currentTarget = nil
+    local targetLostTime = 0
+    local maxTargetLostTime = 0.5 -- Время в секундах до смены цели
+    
+    RunService.RenderStepped:Connect(function(deltaTime)
         -- Обновление визуалов
         self:UpdateVisuals()
         
@@ -314,9 +330,45 @@ function LegitModule:Start()
         -- Аимбот
         if shouldAim then
             local target = self:GetBestTarget()
+            
             if target then
+                -- Обновляем позицию цели в реальном времени
+                if target.Character then
+                    local updatedPos = GetHitboxPosition(target.Character, target.Hitbox)
+                    if updatedPos then
+                        target.Position = updatedPos
+                    end
+                end
+                
+                -- Наводимся на цель
                 self:SmoothAim(target.Position)
+                currentTarget = target
+                targetLostTime = 0
+            else
+                -- Если цель потеряна, продолжаем наводиться на последнюю позицию
+                if currentTarget then
+                    targetLostTime = targetLostTime + deltaTime
+                    
+                    if targetLostTime < maxTargetLostTime then
+                        -- Обновляем позицию последней цели
+                        if currentTarget.Character then
+                            local updatedPos = GetHitboxPosition(currentTarget.Character, currentTarget.Hitbox)
+                            if updatedPos then
+                                currentTarget.Position = updatedPos
+                                self:SmoothAim(currentTarget.Position)
+                            else
+                                currentTarget = nil
+                            end
+                        end
+                    else
+                        currentTarget = nil
+                    end
+                end
             end
+        else
+            -- Сбрасываем цель если аимбот выключен
+            currentTarget = nil
+            targetLostTime = 0
         end
         
         -- Триггербот
@@ -324,14 +376,16 @@ function LegitModule:Start()
             if self:CheckTriggerbot() then
                 triggerCooldown = true
                 
-                task.wait(self.Settings.Triggerbot.Delay / 1000)
-                
-                -- Симуляция клика
-                mouse1press()
-                task.wait(0.05)
-                mouse1release()
-                
-                triggerCooldown = false
+                task.spawn(function()
+                    task.wait(self.Settings.Triggerbot.Delay / 1000)
+                    
+                    -- Симуляция клика
+                    mouse1press()
+                    task.wait(0.05)
+                    mouse1release()
+                    
+                    triggerCooldown = false
+                end)
             end
         end
     end)
