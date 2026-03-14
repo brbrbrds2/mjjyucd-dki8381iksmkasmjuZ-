@@ -268,13 +268,51 @@ end
 
 -- Основной цикл
 local triggerCooldown = false
+local aimbotKeybind = nil
+local aimbotToggleMode = false
+
+-- Функция для установки кейбинда
+function LegitModule:SetAimbotKeybind(key)
+    aimbotKeybind = key
+end
+
+-- Функция для получения состояния кейбинда
+local function IsKeybindPressed()
+    if not aimbotKeybind or aimbotKeybind == "None" then
+        return false
+    end
+    
+    local UserInputService = game:GetService("UserInputService")
+    
+    -- Проверка для кнопок мыши
+    if aimbotKeybind == "M1B" then
+        return UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton1)
+    elseif aimbotKeybind == "M2B" then
+        return UserInputService:IsMouseButtonPressed(Enum.UserInputType.MouseButton2)
+    end
+    
+    -- Проверка для клавиш клавиатуры
+    local keyCode = Enum.KeyCode[aimbotKeybind]
+    if keyCode then
+        return UserInputService:IsKeyDown(keyCode)
+    end
+    
+    return false
+end
+
 function LegitModule:Start()
     RunService.RenderStepped:Connect(function()
         -- Обновление визуалов
         self:UpdateVisuals()
         
+        -- Проверка кейбинда для аимбота
+        local shouldAim = self.Settings.Aimbot.Enabled
+        if aimbotKeybind and aimbotKeybind ~= "None" then
+            shouldAim = IsKeybindPressed()
+        end
+        
         -- Аимбот
-        if self.Settings.Aimbot.Enabled then
+        if shouldAim then
             local target = self:GetBestTarget()
             if target then
                 self:SmoothAim(target.Position)
