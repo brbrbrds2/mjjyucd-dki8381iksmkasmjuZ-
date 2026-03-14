@@ -468,33 +468,41 @@ function LegitModule:Start()
     local maxTargetLostTime = 0.5 -- Время в секундах до смены цели
     
     -- Хук для перехвата выстрелов (Silent Aim) - только если поддерживается
-    if hookmetamethod then
-        local oldNamecall
-        oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-            local method = getnamecallmethod()
-            local args = {...}
-            
-            -- Перехватываем FireServer для оружия
-            if method == "FireServer" then
-                if LegitModule.Settings.Aimbot.SilentAim and silentAimTarget and silentAimTarget.Position then
-                    -- Подменяем направление выстрела на цель
-                    local direction = (silentAimTarget.Position - Camera.CFrame.Position).Unit
-                    
-                    -- Пытаемся найти аргумент с направлением и заменить его
-                    for i, arg in ipairs(args) do
-                        if typeof(arg) == "Vector3" then
-                            args[i] = silentAimTarget.Position
-                        elseif typeof(arg) == "CFrame" then
-                            args[i] = CFrame.new(Camera.CFrame.Position, silentAimTarget.Position)
+    local silentAimHookSuccess = false
+    if hookmetamethod and getnamecallmethod then
+        local success, err = pcall(function()
+            local oldNamecall
+            oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+                local method = getnamecallmethod()
+                local args = {...}
+                
+                -- Перехватываем FireServer для оружия
+                if method == "FireServer" then
+                    if LegitModule.Settings.Aimbot.SilentAim and silentAimTarget and silentAimTarget.Position then
+                        -- Подменяем направление выстрела на цель
+                        -- Пытаемся найти аргумент с направлением и заменить его
+                        for i, arg in ipairs(args) do
+                            if typeof(arg) == "Vector3" then
+                                args[i] = silentAimTarget.Position
+                            elseif typeof(arg) == "CFrame" then
+                                args[i] = CFrame.new(Camera.CFrame.Position, silentAimTarget.Position)
+                            end
                         end
                     end
                 end
-            end
-            
-            return oldNamecall(self, unpack(args))
+                
+                return oldNamecall(self, unpack(args))
+            end)
         end)
+        
+        if success then
+            silentAimHookSuccess = true
+            print("Silent Aim hook installed successfully")
+        else
+            warn("Silent Aim hook failed:", err)
+        end
     else
-        warn("Silent Aim not supported - hookmetamethod not available")
+        warn("Silent Aim not supported - required functions not available")
     end
     
     RunService.RenderStepped:Connect(function(deltaTime)
@@ -518,7 +526,7 @@ function LegitModule:Start()
                 end
                 
                 -- Если Silent Aim включен, только сохраняем цель без движения камеры
-                if self.Settings.Aimbot.SilentAim then
+                if self.Settings.Aimbot.SilentAim and silentAimHookSuccess then
                     silentAimTarget = target
                 else
                     -- Обычный аимбот - наводим камеру
@@ -540,7 +548,7 @@ function LegitModule:Start()
                             if updatedPos then
                                 currentTarget.Position = updatedPos
                                 
-                                if self.Settings.Aimbot.SilentAim then
+                                if self.Settings.Aimbot.SilentAim and silentAimHookSuccess then
                                     silentAimTarget = currentTarget
                                 else
                                     self:SmoothAim(currentTarget.Position)
