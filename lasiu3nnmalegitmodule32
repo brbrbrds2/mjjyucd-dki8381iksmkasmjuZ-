@@ -280,11 +280,21 @@ end
 -- Основной цикл
 local triggerCooldown = false
 local aimbotKeybind = nil
-local aimbotToggleMode = false
+local aimbotKeybindMode = "Hold"
+local aimbotToggleState = false
+local lastKeybindState = false
 
 -- Функция для установки кейбинда
 function LegitModule:SetAimbotKeybind(key)
     aimbotKeybind = key
+end
+
+-- Функция для установки режима кейбинда
+function LegitModule:SetKeybindMode(mode)
+    aimbotKeybindMode = mode
+    -- Сбрасываем состояние при смене режима
+    aimbotToggleState = false
+    lastKeybindState = false
 end
 
 -- Функция для получения состояния кейбинда
@@ -311,6 +321,36 @@ local function IsKeybindPressed()
     return false
 end
 
+-- Функция для проверки активации аимбота с учетом режима
+local function ShouldAimbot()
+    local baseEnabled = LegitModule.Settings.Aimbot.Enabled
+    
+    -- Если кейбинд не установлен, используем только базовое состояние
+    if not aimbotKeybind or aimbotKeybind == "None" then
+        return baseEnabled
+    end
+    
+    local currentKeybindState = IsKeybindPressed()
+    
+    -- Режим Hold - аимбот работает только при зажатии
+    if aimbotKeybindMode == "Hold" then
+        return currentKeybindState
+    end
+    
+    -- Режим Toggle - переключение по нажатию
+    if aimbotKeybindMode == "Toggle" then
+        -- Обнаружение нажатия (переход из false в true)
+        if currentKeybindState and not lastKeybindState then
+            aimbotToggleState = not aimbotToggleState
+        end
+        
+        lastKeybindState = currentKeybindState
+        return aimbotToggleState
+    end
+    
+    return baseEnabled
+end
+
 function LegitModule:Start()
     -- Переменная для отслеживания текущей цели
     local currentTarget = nil
@@ -321,11 +361,8 @@ function LegitModule:Start()
         -- Обновление визуалов
         self:UpdateVisuals()
         
-        -- Проверка кейбинда для аимбота
-        local shouldAim = self.Settings.Aimbot.Enabled
-        if aimbotKeybind and aimbotKeybind ~= "None" then
-            shouldAim = IsKeybindPressed()
-        end
+        -- Проверка активации аимбота с учетом режима кейбинда
+        local shouldAim = ShouldAimbot()
         
         -- Аимбот
         if shouldAim then
