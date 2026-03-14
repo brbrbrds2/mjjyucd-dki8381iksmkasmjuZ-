@@ -467,17 +467,17 @@ function LegitModule:Start()
     local targetLostTime = 0
     local maxTargetLostTime = 0.5 -- Время в секундах до смены цели
     
-    -- Хук для перехвата выстрелов (Silent Aim)
-    local oldNamecall
-    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
-        local method = getnamecallmethod()
-        local args = {...}
-        
-        -- Перехватываем FireServer для оружия
-        if method == "FireServer" and self.Name == "ShootEvent" or self.Name == "Fire" or self.Name == "RemoteEvent" then
-            if LegitModule.Settings.Aimbot.SilentAim and silentAimTarget then
-                -- Подменяем направление выстрела на цель
-                if silentAimTarget.Position then
+    -- Хук для перехвата выстрелов (Silent Aim) - только если поддерживается
+    if hookmetamethod then
+        local oldNamecall
+        oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+            local method = getnamecallmethod()
+            local args = {...}
+            
+            -- Перехватываем FireServer для оружия
+            if method == "FireServer" then
+                if LegitModule.Settings.Aimbot.SilentAim and silentAimTarget and silentAimTarget.Position then
+                    -- Подменяем направление выстрела на цель
                     local direction = (silentAimTarget.Position - Camera.CFrame.Position).Unit
                     
                     -- Пытаемся найти аргумент с направлением и заменить его
@@ -490,10 +490,12 @@ function LegitModule:Start()
                     end
                 end
             end
-        end
-        
-        return oldNamecall(self, unpack(args))
-    end)
+            
+            return oldNamecall(self, unpack(args))
+        end)
+    else
+        warn("Silent Aim not supported - hookmetamethod not available")
+    end
     
     RunService.RenderStepped:Connect(function(deltaTime)
         -- Обновление визуалов
