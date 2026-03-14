@@ -15,6 +15,7 @@ local Camera = Workspace.CurrentCamera
 LegitModule.Settings = {
     Aimbot = {
         Enabled = false,
+        SilentAim = false,
         FOV = 90,
         Smoothness = 50,
         TargetMode = "Closest to Crosshair",
@@ -386,6 +387,7 @@ local aimbotKeybind = nil
 local aimbotKeybindMode = "Hold"
 local aimbotToggleState = false
 local lastKeybindState = false
+local silentAimTarget = nil -- Текущая цель для Silent Aim
 
 -- Функция для установки кейбинда
 function LegitModule:SetAimbotKeybind(key)
@@ -398,6 +400,11 @@ function LegitModule:SetKeybindMode(mode)
     -- Сбрасываем состояние при смене режима
     aimbotToggleState = false
     lastKeybindState = false
+end
+
+-- Функция для получения текущей цели Silent Aim
+function LegitModule:GetSilentAimTarget()
+    return silentAimTarget
 end
 
 -- Функция для получения состояния кейбинда
@@ -460,6 +467,34 @@ function LegitModule:Start()
     local targetLostTime = 0
     local maxTargetLostTime = 0.5 -- Время в секундах до смены цели
     
+    -- Хук для перехвата выстрелов (Silent Aim)
+    local oldNamecall
+    oldNamecall = hookmetamethod(game, "__namecall", function(self, ...)
+        local method = getnamecallmethod()
+        local args = {...}
+        
+        -- Перехватываем FireServer для оружия
+        if method == "FireServer" and self.Name == "ShootEvent" or self.Name == "Fire" or self.Name == "RemoteEvent" then
+            if LegitModule.Settings.Aimbot.SilentAim and silentAimTarget then
+                -- Подменяем направление выстрела на цель
+                if silentAimTarget.Position then
+                    local direction = (silentAimTarget.Position - Camera.CFrame.Position).Unit
+                    
+                    -- Пытаемся найти аргумент с направлением и заменить его
+                    for i, arg in ipairs(args) do
+                        if typeof(arg) == "Vector3" then
+                            args[i] = silentAimTarget.Position
+                        elseif typeof(arg) == "CFrame" then
+                            args[i] = CFrame.new(Camera.CFrame.Position, silentAimTarget.Position)
+                        end
+                    end
+                end
+            end
+        end
+        
+        return oldNamecall(self, unpack(args))
+    end)
+    
     RunService.RenderStepped:Connect(function(deltaTime)
         -- Обновление визуалов
         self:UpdateVisuals()
@@ -480,8 +515,15 @@ function LegitModule:Start()
                     end
                 end
                 
-                -- Наводимся на цель
-                self:SmoothAim(target.Position)
+                -- Если Silent Aim включен, только сохраняем цель без движения камеры
+                if self.Settings.Aimbot.SilentAim then
+                    silentAimTarget = target
+                else
+                    -- Обычный аимбот - наводим камеру
+                    self:SmoothAim(target.Position)
+                    silentAimTarget = nil
+                end
+                
                 currentTarget = target
                 targetLostTime = 0
             else
@@ -495,20 +537,31 @@ function LegitModule:Start()
                             local updatedPos = GetHitboxPosition(currentTarget.Character, currentTarget.Hitbox)
                             if updatedPos then
                                 currentTarget.Position = updatedPos
-                                self:SmoothAim(currentTarget.Position)
+                                
+                                if self.Settings.Aimbot.SilentAim then
+                                    silentAimTarget = currentTarget
+                                else
+                                    self:SmoothAim(currentTarget.Position)
+                                    silentAimTarget = nil
+                                end
                             else
                                 currentTarget = nil
+                                silentAimTarget = nil
                             end
                         end
                     else
                         currentTarget = nil
+                        silentAimTarget = nil
                     end
+                else
+                    silentAimTarget = nil
                 end
             end
         else
             -- Сбрасываем цель если аимбот выключен
             currentTarget = nil
             targetLostTime = 0
+            silentAimTarget = nil
         end
         
         -- Триггербот
