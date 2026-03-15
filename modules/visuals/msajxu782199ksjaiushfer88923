@@ -189,7 +189,8 @@ local function UpdateESP(esp)
     local headScreen, headVisible = Camera:WorldToViewportPoint(headPos)
     local legScreen, legVisible = Camera:WorldToViewportPoint(legPos)
     
-    if not headVisible or not legVisible then
+    -- Проверяем что игрок перед камерой (Z > 0) и на экране
+    if not headVisible or not legVisible or headScreen.Z <= 0 or legScreen.Z <= 0 then
         for _, drawingGroup in pairs(esp.Drawings) do
             if type(drawingGroup) == "table" then
                 for _, drawing in pairs(drawingGroup) do
