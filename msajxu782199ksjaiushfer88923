@@ -1,1 +1,387 @@
+-- PlayersModule - Модуль для ESP и визуализации игроков
+local PlayersModule = {}
 
+-- Сервисы
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+
+-- Локальный игрок
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+-- Настройки ESP
+PlayersModule.Settings = {
+    ESP = {
+        Enabled = false,
+        Box = false,
+        Name = false,
+        Health = false,
+        Distance = false,
+        Color = Color3.fromRGB(255, 255, 255),
+        TeamCheck = false,
+        MaxDistance = 1000
+    },
+    Chams = {
+        Enabled = false,
+        Color = Color3.fromRGB(255, 0, 0),
+        Transparency = 0.5
+    }
+}
+
+-- Хранилище ESP объектов для каждого игрока
+local ESPObjects = {}
+
+-- Создать ESP для игрока
+local function CreateESP(player)
+    if player == LocalPlayer then return end
+    
+    local esp = {
+        Player = player,
+        Drawings = {}
+    }
+    
+    -- Box (4 линии)
+    esp.Drawings.BoxOutline = {}
+    esp.Drawings.Box = {}
+    for i = 1, 4 do
+        local outline = Drawing.new("Line")
+        outline.Thickness = 3
+        outline.Color = Color3.fromRGB(0, 0, 0)
+        outline.Visible = false
+        esp.Drawings.BoxOutline[i] = outline
+        
+        local line = Drawing.new("Line")
+        line.Thickness = 1
+        line.Color = Color3.fromRGB(255, 255, 255)
+        line.Visible = false
+        esp.Drawings.Box[i] = line
+    end
+    
+    -- Health Bar
+    esp.Drawings.HealthBarOutline = Drawing.new("Line")
+    esp.Drawings.HealthBarOutline.Thickness = 4
+    esp.Drawings.HealthBarOutline.Color = Color3.fromRGB(0, 0, 0)
+    esp.Drawings.HealthBarOutline.Visible = false
+    
+    esp.Drawings.HealthBar = Drawing.new("Line")
+    esp.Drawings.HealthBar.Thickness = 2
+    esp.Drawings.HealthBar.Color = Color3.fromRGB(0, 255, 0)
+    esp.Drawings.HealthBar.Visible = false
+    
+    -- Name Text
+    esp.Drawings.Name = Drawing.new("Text")
+    esp.Drawings.Name.Size = 13
+    esp.Drawings.Name.Center = true
+    esp.Drawings.Name.Outline = true
+    esp.Drawings.Name.Color = Color3.fromRGB(255, 255, 255)
+    esp.Drawings.Name.Visible = false
+    
+    -- Distance Text
+    esp.Drawings.Distance = Drawing.new("Text")
+    esp.Drawings.Distance.Size = 12
+    esp.Drawings.Distance.Center = true
+    esp.Drawings.Distance.Outline = true
+    esp.Drawings.Distance.Color = Color3.fromRGB(255, 255, 255)
+    esp.Drawings.Distance.Visible = false
+    
+    -- Health Text
+    esp.Drawings.HealthText = Drawing.new("Text")
+    esp.Drawings.HealthText.Size = 12
+    esp.Drawings.HealthText.Center = false
+    esp.Drawings.HealthText.Outline = true
+    esp.Drawings.HealthText.Color = Color3.fromRGB(255, 255, 255)
+    esp.Drawings.HealthText.Visible = false
+    
+    return esp
+end
+
+-- Удалить ESP
+local function RemoveESP(esp)
+    if not esp then return end
+    
+    for _, drawingGroup in pairs(esp.Drawings) do
+        if type(drawingGroup) == "table" then
+            for _, drawing in pairs(drawingGroup) do
+                drawing:Remove()
+            end
+        else
+            drawingGroup:Remove()
+        end
+    end
+end
+
+-- Обновить ESP для игрока
+local function UpdateESP(esp)
+    if not esp or not esp.Player then return end
+    
+    local player = esp.Player
+    local character = player.Character
+    
+    -- Проверки
+    if not character then
+        for _, drawingGroup in pairs(esp.Drawings) do
+            if type(drawingGroup) == "table" then
+                for _, drawing in pairs(drawingGroup) do
+                    drawing.Visible = false
+                end
+            else
+                drawingGroup.Visible = false
+            end
+        end
+        return
+    end
+    
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    
+    if not humanoid or not rootPart or humanoid.Health <= 0 then
+        for _, drawingGroup in pairs(esp.Drawings) do
+            if type(drawingGroup) == "table" then
+                for _, drawing in pairs(drawingGroup) do
+                    drawing.Visible = false
+                end
+            else
+                drawingGroup.Visible = false
+            end
+        end
+        return
+    end
+    
+    -- Проверка команды
+    if PlayersModule.Settings.ESP.TeamCheck and player.Team == LocalPlayer.Team then
+        for _, drawingGroup in pairs(esp.Drawings) do
+            if type(drawingGroup) == "table" then
+                for _, drawing in pairs(drawingGroup) do
+                    drawing.Visible = false
+                end
+            else
+                drawingGroup.Visible = false
+            end
+        end
+        return
+    end
+    
+    -- Проверка дистанции
+    local distance = (LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")) 
+        and (LocalPlayer.Character.HumanoidRootPart.Position - rootPart.Position).Magnitude or math.huge
+    
+    if distance > PlayersModule.Settings.ESP.MaxDistance then
+        for _, drawingGroup in pairs(esp.Drawings) do
+            if type(drawingGroup) == "table" then
+                for _, drawing in pairs(drawingGroup) do
+                    drawing.Visible = false
+                end
+            else
+                drawingGroup.Visible = false
+            end
+        end
+        return
+    end
+    
+    -- Получаем размеры персонажа
+    local head = character:FindFirstChild("Head")
+    if not head then return end
+    
+    local headPos = head.Position + Vector3.new(0, head.Size.Y / 2, 0)
+    local legPos = rootPart.Position - Vector3.new(0, 3, 0)
+    
+    local headScreen, headVisible = Camera:WorldToViewportPoint(headPos)
+    local legScreen, legVisible = Camera:WorldToViewportPoint(legPos)
+    
+    if not headVisible or not legVisible then
+        for _, drawingGroup in pairs(esp.Drawings) do
+            if type(drawingGroup) == "table" then
+                for _, drawing in pairs(drawingGroup) do
+                    drawing.Visible = false
+                end
+            else
+                drawingGroup.Visible = false
+            end
+        end
+        return
+    end
+    
+    -- Вычисляем размеры бокса
+    local height = math.abs(headScreen.Y - legScreen.Y)
+    local width = height / 2
+    
+    local topLeft = Vector2.new(headScreen.X - width / 2, headScreen.Y)
+    local topRight = Vector2.new(headScreen.X + width / 2, headScreen.Y)
+    local bottomLeft = Vector2.new(headScreen.X - width / 2, legScreen.Y)
+    local bottomRight = Vector2.new(headScreen.X + width / 2, legScreen.Y)
+    
+    -- Обновляем цвет
+    local espColor = PlayersModule.Settings.ESP.Color
+    
+    -- Box ESP
+    if PlayersModule.Settings.ESP.Enabled and PlayersModule.Settings.ESP.Box then
+        -- Outline
+        esp.Drawings.BoxOutline[1].From = topLeft
+        esp.Drawings.BoxOutline[1].To = topRight
+        esp.Drawings.BoxOutline[2].From = topRight
+        esp.Drawings.BoxOutline[2].To = bottomRight
+        esp.Drawings.BoxOutline[3].From = bottomRight
+        esp.Drawings.BoxOutline[3].To = bottomLeft
+        esp.Drawings.BoxOutline[4].From = bottomLeft
+        esp.Drawings.BoxOutline[4].To = topLeft
+        
+        -- Main box
+        esp.Drawings.Box[1].From = topLeft
+        esp.Drawings.Box[1].To = topRight
+        esp.Drawings.Box[1].Color = espColor
+        esp.Drawings.Box[2].From = topRight
+        esp.Drawings.Box[2].To = bottomRight
+        esp.Drawings.Box[2].Color = espColor
+        esp.Drawings.Box[3].From = bottomRight
+        esp.Drawings.Box[3].To = bottomLeft
+        esp.Drawings.Box[3].Color = espColor
+        esp.Drawings.Box[4].From = bottomLeft
+        esp.Drawings.Box[4].To = topLeft
+        esp.Drawings.Box[4].Color = espColor
+        
+        for i = 1, 4 do
+            esp.Drawings.BoxOutline[i].Visible = true
+            esp.Drawings.Box[i].Visible = true
+        end
+    else
+        for i = 1, 4 do
+            esp.Drawings.BoxOutline[i].Visible = false
+            esp.Drawings.Box[i].Visible = false
+        end
+    end
+    
+    -- Health Bar
+    if PlayersModule.Settings.ESP.Enabled and PlayersModule.Settings.ESP.Health then
+        local healthPercent = humanoid.Health / humanoid.MaxHealth
+        local barHeight = height * healthPercent
+        
+        local barTop = Vector2.new(topLeft.X - 6, legScreen.Y)
+        local barBottom = Vector2.new(topLeft.X - 6, legScreen.Y - barHeight)
+        
+        -- Outline
+        esp.Drawings.HealthBarOutline.From = Vector2.new(topLeft.X - 6, topLeft.Y)
+        esp.Drawings.HealthBarOutline.To = Vector2.new(topLeft.X - 6, legScreen.Y)
+        esp.Drawings.HealthBarOutline.Visible = true
+        
+        -- Health bar color (green to red)
+        local healthColor = Color3.fromRGB(
+            math.floor(255 * (1 - healthPercent)),
+            math.floor(255 * healthPercent),
+            0
+        )
+        
+        esp.Drawings.HealthBar.From = barTop
+        esp.Drawings.HealthBar.To = barBottom
+        esp.Drawings.HealthBar.Color = healthColor
+        esp.Drawings.HealthBar.Visible = true
+        
+        -- Health text
+        esp.Drawings.HealthText.Text = tostring(math.floor(humanoid.Health))
+        esp.Drawings.HealthText.Position = Vector2.new(topLeft.X - 18, barBottom.Y - 6)
+        esp.Drawings.HealthText.Color = healthColor
+        esp.Drawings.HealthText.Visible = true
+    else
+        esp.Drawings.HealthBarOutline.Visible = false
+        esp.Drawings.HealthBar.Visible = false
+        esp.Drawings.HealthText.Visible = false
+    end
+    
+    -- Name ESP
+    if PlayersModule.Settings.ESP.Enabled and PlayersModule.Settings.ESP.Name then
+        esp.Drawings.Name.Text = player.Name
+        esp.Drawings.Name.Position = Vector2.new(headScreen.X, topLeft.Y - 16)
+        esp.Drawings.Name.Color = espColor
+        esp.Drawings.Name.Visible = true
+    else
+        esp.Drawings.Name.Visible = false
+    end
+    
+    -- Distance ESP
+    if PlayersModule.Settings.ESP.Enabled and PlayersModule.Settings.ESP.Distance then
+        esp.Drawings.Distance.Text = string.format("%.0f studs", distance)
+        esp.Drawings.Distance.Position = Vector2.new(headScreen.X, bottomRight.Y + 2)
+        esp.Drawings.Distance.Color = espColor
+        esp.Drawings.Distance.Visible = true
+    else
+        esp.Drawings.Distance.Visible = false
+    end
+end
+
+-- Обновить Chams для игрока
+local function UpdateChams(player)
+    if not player or player == LocalPlayer then return end
+    
+    local character = player.Character
+    if not character then return end
+    
+    if PlayersModule.Settings.Chams.Enabled then
+        for _, part in pairs(character:GetDescendants()) do
+            if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                -- Создаем или обновляем Highlight
+                local highlight = part:FindFirstChild("ESPHighlight")
+                if not highlight then
+                    highlight = Instance.new("Highlight")
+                    highlight.Name = "ESPHighlight"
+                    highlight.Parent = part
+                end
+                
+                highlight.FillColor = PlayersModule.Settings.Chams.Color
+                highlight.FillTransparency = PlayersModule.Settings.Chams.Transparency
+                highlight.OutlineTransparency = 1
+                highlight.Enabled = true
+            end
+        end
+    else
+        for _, part in pairs(character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                local highlight = part:FindFirstChild("ESPHighlight")
+                if highlight then
+                    highlight:Destroy()
+                end
+            end
+        end
+    end
+end
+
+-- Запуск модуля
+function PlayersModule:Start()
+    print("[PlayersModule] Starting...")
+    
+    -- Создаем ESP для существующих игроков
+    for _, player in pairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer then
+            ESPObjects[player] = CreateESP(player)
+        end
+    end
+    
+    -- Слушаем новых игроков
+    Players.PlayerAdded:Connect(function(player)
+        ESPObjects[player] = CreateESP(player)
+    end)
+    
+    -- Удаляем ESP при выходе игрока
+    Players.PlayerRemoving:Connect(function(player)
+        if ESPObjects[player] then
+            RemoveESP(ESPObjects[player])
+            ESPObjects[player] = nil
+        end
+    end)
+    
+    -- Основной цикл обновления
+    RunService.RenderStepped:Connect(function()
+        for player, esp in pairs(ESPObjects) do
+            if player and player.Parent then
+                UpdateESP(esp)
+                UpdateChams(player)
+            else
+                RemoveESP(esp)
+                ESPObjects[player] = nil
+            end
+        end
+    end)
+    
+    print("[PlayersModule] Started successfully!")
+end
+
+return PlayersModule
