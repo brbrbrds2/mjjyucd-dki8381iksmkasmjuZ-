@@ -537,13 +537,9 @@ function LegitModule:Start()
             -- Отслеживаем отпускание ЛКМ
             UserInputService.InputEnded:Connect(function(input, gameProcessed)
                 if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                    -- Не возвращаем камеру сразу - ждем пока RenderStepped не отработает 5 кадров
                     isShooting = false
-                    -- Возвращаем камеру на сохраненную позицию
-                    if savedCameraPosition then
-                        Camera.CFrame = savedCameraPosition
-                        savedCameraPosition = nil
-                        print("[Silent Aim] Stopped shooting, restored camera")
-                    end
+                    print("[Silent Aim] Stopped shooting")
                 end
             end)
         end)
@@ -574,16 +570,17 @@ function LegitModule:Start()
                 end
             end
             
-            -- Удерживаем камеру на цели в течение первых 3 кадров после начала стрельбы
-            if silentAimFrameCount < 3 then
+            -- Удерживаем камеру на цели в течение первых 5 кадров после начала стрельбы
+            if silentAimFrameCount < 5 then
                 Camera.CFrame = CFrame.new(Camera.CFrame.Position, silentAimTarget.Position)
                 silentAimFrameCount = silentAimFrameCount + 1
                 print("[Silent Aim] Holding camera on target, frame:", silentAimFrameCount)
-            elseif silentAimFrameCount == 3 and savedCameraPosition then
-                -- После 3 кадров возвращаем камеру
+            elseif silentAimFrameCount == 5 and savedCameraPosition then
+                -- После 5 кадров возвращаем камеру
                 Camera.CFrame = savedCameraPosition
                 silentAimFrameCount = silentAimFrameCount + 1
-                print("[Silent Aim] Restored camera after 3 frames")
+                savedCameraPosition = nil
+                print("[Silent Aim] Restored camera after 5 frames")
             end
         else
             silentAimFrameCount = 0
