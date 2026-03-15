@@ -470,8 +470,9 @@ function LegitModule:Start()
     local targetLostTime = 0
     local maxTargetLostTime = 0.5 -- Время в секундах до смены цели
     
-    -- Silent Aim через альтернативный метод (без hookmetamethod)
+    -- Silent Aim переменные
     local isShooting = false
+    local silentAimFrameCount = 0
     
     -- Пытаемся найти RemoteEvent для стрельбы
     local function setupSilentAim()
@@ -513,16 +514,20 @@ function LegitModule:Start()
             warn("[LegitModule] Mouse metatable method failed")
         end
         
-        -- Метод 2: Быстрое переключение камеры (невидимое для игрока)
+        -- Метод 2: Удержание камеры на несколько кадров
         local cameraSuccess = pcall(function()
-            print("[LegitModule] Setting up invisible Camera manipulation for Silent Aim")
+            print("[LegitModule] Setting up Camera manipulation for Silent Aim")
             
             -- Отслеживаем нажатие ЛКМ
             UserInputService.InputBegan:Connect(function(input, gameProcessed)
                 if gameProcessed then return end
                 
                 if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                    isShooting = true
+                    if LegitModule.Settings.Aimbot.SilentAim and silentAimTarget and silentAimTarget.Position then
+                        isShooting = true
+                        silentAimFrameCount = 0
+                        print("[Silent Aim] Started shooting")
+                    end
                 end
             end)
             
@@ -530,37 +535,13 @@ function LegitModule:Start()
             UserInputService.InputEnded:Connect(function(input, gameProcessed)
                 if input.UserInputType == Enum.UserInputType.MouseButton1 then
                     isShooting = false
-                end
-            end)
-            
-            -- Перехватываем момент выстрела через RenderStepped с высоким приоритетом
-            RunService.RenderStepped:Connect(function()
-                if isShooting and LegitModule.Settings.Aimbot.SilentAim and silentAimTarget and silentAimTarget.Position then
-                    -- Сохраняем текущую позицию камеры
-                    local originalCFrame = Camera.CFrame
-                    
-                    -- Обновляем позицию цели
-                    if silentAimTarget.Character then
-                        local updatedPos = GetHitboxPosition(silentAimTarget.Character, silentAimTarget.Hitbox)
-                        if updatedPos then
-                            silentAimTarget.Position = updatedPos
-                        end
-                    end
-                    
-                    -- Мгновенно перенаправляем камеру на цель (для сервера)
-                    Camera.CFrame = CFrame.new(originalCFrame.Position, silentAimTarget.Position)
-                    
-                    -- Мгновенно возвращаем камеру обратно (в том же кадре)
-                    -- Используем task.defer для выполнения в конце текущего кадра
-                    task.defer(function()
-                        Camera.CFrame = originalCFrame
-                    end)
+                    print("[Silent Aim] Stopped shooting")
                 end
             end)
         end)
         
         if cameraSuccess then
-            print("[LegitModule] Silent Aim installed via invisible Camera manipulation")
+            print("[LegitModule] Silent Aim camera tracking installed")
         else
             warn("[LegitModule] Camera manipulation method failed")
         end
@@ -573,6 +554,28 @@ function LegitModule:Start()
     setupSilentAim()
     
     print("[LegitModule] Starting main loop...")
+    
+    -- Отдельный RenderStepped для Silent Aim с высоким приоритетом
+    RunService.RenderStepped:Connect(function()
+        if isShooting and LegitModule.Settings.Aimbot.SilentAim and silentAimTarget and silentAimTarget.Position then
+            -- Обновляем позицию цели
+            if silentAimTarget.Character then
+                local updatedPos = GetHitboxPosition(silentAimTarget.Character, silentAimTarget.Hitbox)
+                if updatedPos then
+                    silentAimTarget.Position = updatedPos
+                end
+            end
+            
+            -- Удерживаем камеру на цели в течение первых 3 кадров после начала стрельбы
+            if silentAimFrameCount < 3 then
+                Camera.CFrame = CFrame.new(Camera.CFrame.Position, silentAimTarget.Position)
+                silentAimFrameCount = silentAimFrameCount + 1
+                print("[Silent Aim] Holding camera on target, frame:", silentAimFrameCount)
+            end
+        else
+            silentAimFrameCount = 0
+        end
+    end)
     
     RunService.RenderStepped:Connect(function(deltaTime)
         -- Обновление визуалов
@@ -597,7 +600,7 @@ function LegitModule:Start()
                 -- Если Silent Aim включен, только сохраняем цель без движения камеры
                 if self.Settings.Aimbot.SilentAim then
                     silentAimTarget = target
-                    -- Камера остается полностью свободной - игрок не видит никакого движения
+                    -- Камера остается свободной (кроме момента выстрела)
                 else
                     -- Обычный аимбот - наводим камеру
                     self:SmoothAim(target.Position)
