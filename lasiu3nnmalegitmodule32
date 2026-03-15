@@ -473,6 +473,7 @@ function LegitModule:Start()
     -- Silent Aim переменные
     local isShooting = false
     local silentAimFrameCount = 0
+    local savedCameraPosition = nil
     
     -- Пытаемся найти RemoteEvent для стрельбы
     local function setupSilentAim()
@@ -526,7 +527,9 @@ function LegitModule:Start()
                     if LegitModule.Settings.Aimbot.SilentAim and silentAimTarget and silentAimTarget.Position then
                         isShooting = true
                         silentAimFrameCount = 0
-                        print("[Silent Aim] Started shooting")
+                        -- Сохраняем текущую позицию камеры
+                        savedCameraPosition = Camera.CFrame
+                        print("[Silent Aim] Started shooting, saved camera position")
                     end
                 end
             end)
@@ -535,7 +538,12 @@ function LegitModule:Start()
             UserInputService.InputEnded:Connect(function(input, gameProcessed)
                 if input.UserInputType == Enum.UserInputType.MouseButton1 then
                     isShooting = false
-                    print("[Silent Aim] Stopped shooting")
+                    -- Возвращаем камеру на сохраненную позицию
+                    if savedCameraPosition then
+                        Camera.CFrame = savedCameraPosition
+                        savedCameraPosition = nil
+                        print("[Silent Aim] Stopped shooting, restored camera")
+                    end
                 end
             end)
         end)
@@ -571,6 +579,11 @@ function LegitModule:Start()
                 Camera.CFrame = CFrame.new(Camera.CFrame.Position, silentAimTarget.Position)
                 silentAimFrameCount = silentAimFrameCount + 1
                 print("[Silent Aim] Holding camera on target, frame:", silentAimFrameCount)
+            elseif silentAimFrameCount == 3 and savedCameraPosition then
+                -- После 3 кадров возвращаем камеру
+                Camera.CFrame = savedCameraPosition
+                silentAimFrameCount = silentAimFrameCount + 1
+                print("[Silent Aim] Restored camera after 3 frames")
             end
         else
             silentAimFrameCount = 0
