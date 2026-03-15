@@ -471,16 +471,14 @@ function LegitModule:Start()
     local maxTargetLostTime = 0.5 -- Время в секундах до смены цели
     
     -- Silent Aim через альтернативный метод (без hookmetamethod)
-    local silentAimConnection = nil
+    local silentAimActive = false
+    local originalCFrame = nil
     
     -- Пытаемся найти RemoteEvent для стрельбы
     local function setupSilentAim()
-        local success = pcall(function()
-            -- Метод 1: Перехват через Mouse
+        -- Метод 1: Перехват через Mouse metatable
+        local mouseSuccess = pcall(function()
             local mouse = LocalPlayer:GetMouse()
-            local oldMouseHit = mouse.Hit
-            
-            -- Создаем метатаблицу для Mouse
             local mouseMeta = getrawmetatable(mouse)
             if mouseMeta then
                 setreadonly(mouseMeta, false)
@@ -488,6 +486,7 @@ function LegitModule:Start()
                 local oldIndex = mouseMeta.__index
                 mouseMeta.__index = newcclosure(function(self, key)
                     if key == "Hit" and LegitModule.Settings.Aimbot.SilentAim and silentAimTarget and silentAimTarget.Position then
+                        print("[Silent Aim] Redirecting Mouse.Hit to target")
                         return CFrame.new(silentAimTarget.Position)
                     end
                     if key == "Target" and LegitModule.Settings.Aimbot.SilentAim and silentAimTarget and silentAimTarget.Character then
@@ -499,6 +498,7 @@ function LegitModule:Start()
                         }
                         local partName = hitboxMap[silentAimTarget.Hitbox]
                         if partName then
+                            print("[Silent Aim] Redirecting Mouse.Target to", partName)
                             return silentAimTarget.Character:FindFirstChild(partName)
                         end
                     end
@@ -507,43 +507,74 @@ function LegitModule:Start()
                 
                 setreadonly(mouseMeta, true)
                 print("[LegitModule] Silent Aim installed via Mouse metatable")
-                return true
             end
         end)
         
-        if not success then
-            -- Метод 2: Перехват через Camera
-            local success2 = pcall(function()
-                -- Некоторые игры используют Camera.CFrame для определения направления
-                -- Мы будем модифицировать его в реальном времени при стрельбе
-                print("[LegitModule] Silent Aim will use Camera manipulation")
+        if not mouseSuccess then
+            warn("[LegitModule] Mouse metatable method failed")
+        end
+        
+        -- Метод 2: Перехват через Camera с улучшенным таймингом
+        local cameraSuccess = pcall(function()
+            print("[LegitModule] Setting up Camera manipulation for Silent Aim")
+            
+            -- Подключаемся к InputBegan для отслеживания начала стрельбы
+            UserInputService.InputBegan:Connect(function(input, gameProcessed)
+                if gameProcessed then return end
                 
-                -- Подключаемся к InputBegan для отслеживания стрельбы
-                UserInputService.InputBegan:Connect(function(input, gameProcessed)
-                    if gameProcessed then return end
-                    
-                    -- Если нажата кнопка стрельбы (обычно ЛКМ)
-                    if input.UserInputType == Enum.UserInputType.MouseButton1 then
-                        if LegitModule.Settings.Aimbot.SilentAim and silentAimTarget and silentAimTarget.Position then
-                            -- Временно перенаправляем камеру на цель
-                            local oldCFrame = Camera.CFrame
-                            Camera.CFrame = CFrame.new(Camera.CFrame.Position, silentAimTarget.Position)
-                            
-                            -- Возвращаем камеру обратно через минимальную задержку
-                            task.wait(0.01)
-                            Camera.CFrame = oldCFrame
-                        end
+                -- Если нажата кнопка стрельбы (обычно ЛКМ)
+                if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                    if LegitModule.Settings.Aimbot.SilentAim and silentAimTarget and silentAimTarget.Position then
+                        silentAimActive = true
+                        originalCFrame = Camera.CFrame
+                        
+                        -- Перенаправляем камеру на цель
+                        Camera.CFrame = CFrame.new(Camera.CFrame.Position, silentAimTarget.Position)
+                        print("[Silent Aim] Camera redirected to target")
                     end
-                end)
-                
-                return true
+                end
             end)
             
-            if success2 then
-                print("[LegitModule] Silent Aim installed via Camera manipulation")
-            else
-                warn("[LegitModule] Silent Aim failed - feature disabled")
-            end
+            -- Подключаемся к InputEnded для возврата камеры
+            UserInputService.InputEnded:Connect(function(input, gameProcessed)
+                -- Если отпущена кнопка стрельбы
+                if input.UserInputType == Enum.UserInputType.MouseButton1 then
+                    if silentAimActive and originalCFrame then
+                        -- Небольшая задержка перед возвратом камеры
+                        task.wait(0.03)
+                        Camera.CFrame = originalCFrame
+                        silentAimActive = false
+                        originalCFrame = nil
+                        print("[Silent Aim] Camera restored")
+                    end
+                end
+            end)
+            
+            -- Дополнительно: удерживаем камеру на цели во время стрельбы
+            RunService.RenderStepped:Connect(function()
+                if silentAimActive and LegitModule.Settings.Aimbot.SilentAim and silentAimTarget and silentAimTarget.Position then
+                    -- Обновляем позицию цели в реальном времени
+                    if silentAimTarget.Character then
+                        local updatedPos = GetHitboxPosition(silentAimTarget.Character, silentAimTarget.Hitbox)
+                        if updatedPos then
+                            silentAimTarget.Position = updatedPos
+                        end
+                    end
+                    
+                    -- Удерживаем камеру на цели
+                    Camera.CFrame = CFrame.new(Camera.CFrame.Position, silentAimTarget.Position)
+                end
+            end)
+        end)
+        
+        if cameraSuccess then
+            print("[LegitModule] Silent Aim installed via Camera manipulation")
+        else
+            warn("[LegitModule] Camera manipulation method failed")
+        end
+        
+        if not mouseSuccess and not cameraSuccess then
+            warn("[LegitModule] Silent Aim failed - feature disabled")
         end
     end
     
@@ -574,7 +605,10 @@ function LegitModule:Start()
                 -- Если Silent Aim включен, только сохраняем цель без движения камеры
                 if self.Settings.Aimbot.SilentAim then
                     silentAimTarget = target
-                    -- Не двигаем камеру в Silent Aim режиме - пули полетят в цель автоматически
+                    -- Не двигаем камеру в Silent Aim режиме (если не стреляем)
+                    if not silentAimActive then
+                        -- Камера свободна для движения
+                    end
                 else
                     -- Обычный аимбот - наводим камеру
                     self:SmoothAim(target.Position)
